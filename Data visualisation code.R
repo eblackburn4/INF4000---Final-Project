@@ -8,6 +8,8 @@ options(scipen = 6, digits = 5)
 library(tidyverse)
 library(hrbrthemes)
 library(ggbump)
+library(circlize)
+library(ComplexUpset)
 
 ## ---------------------------
 # Load in data ------------------------------------------------------------
@@ -20,10 +22,13 @@ song_pop <- read_delim('Datasets/musicoset_popularity/song_pop.csv', delim = '\t
   select(c('song_id','year_end_score', 'year')) |>
   distinct(song_id, .keep_all = TRUE)
 
+hits <- read_delim('Datasets/hits_dataset.csv', delim = '\t')
+non_hits <- read_delim('Datasets/nonhits_dataset.csv', delim = '\t')
+
 #remove extraneous characters from artist name column and add in artist main genres from artist_meta, 
 #splitting up artist ideas for collaborative songs. Also add in year-end song popularity from song_pop
 
-hits <- hits |>
+hits_master <- hits |>
   mutate(name_artists = str_remove_all(name_artists, "\\['|'\\]|'")) |>
   mutate(id_artists = str_remove_all(id_artists, "\\['|'\\]|'")) |>
   separate(id_artists, into = c("id_artists", "id_collaborators"), sep = ", ", fill = "right") |>
@@ -42,7 +47,7 @@ non_hits <- non_hits |>
 # EDA and data processing ---------------------------------------------------------------------
 #explore top genres across the dataset (other than 'no genre' which is #1)
 
-top_genres <- hits |>
+top_genres <- hits_master |>
   group_by(main_genre) |>
   summarise(count = n()) |>
   arrange(desc(count)) |>
@@ -58,19 +63,19 @@ top_genres_plot <- top_genres |>
 
 #define keywords (based on genres from allmusic.com)
 
-hip_hop <- c('hip hop', 'hip-hop', 'rap', 'g funk')
-jazz_funk <- c('jazz', 'funk')
-soul_randb <- c('r&b', 'soul', 'funk', 'jack', 'gospel', 'quiet storm', 'disco')
+hip_hop <- c('hip hop', 'hip-hop', 'rap', 'g funk', 'crunk')
+jazz_funk <- c('jazz', 'funk', 'bebop')
+soul_randb <- c('r&b', 'soul', 'funk', 'jack', 'gospel', 'quiet storm', 'disco', 'groove','motown')
 country <- c('country', 'bluegrass')
 blues <- c('blues')
 folk <- c('folk')
 rock_metal <- c('rock', 'indie','permanent wave','metal','nu','emo','punk','core','screamo', 'british invasion') 
-pop <- c('pop', 'neo mellow', 'boy band')
-electronic <- c('house', 'techno', 'dance', 'edm', 'electro','big room','dubstep','brostep','downtempo', 'reggaeton', 'miami')
-adult_contemporary <- c('adult', 'standards')
+pop <- c('pop', 'neo mellow', 'boy band', 'girl group')
+electronic <- c('house', 'techno', 'dance', 'edm', 'electro','big room','dubstep','brostep','downtempo', 'reggaeton', 'miami', 'bounce')
+adult_contemporary_classical <- c('adult', 'standards', 'easy','soundtrack','classical','symphony','orchestra')
 
 
-hits <- hits |>
+hits_master <- hits_master |>
   filter(main_genre != '-') |>
   mutate(main_genre = str_to_lower(main_genre)) |>
   mutate(
@@ -84,14 +89,14 @@ hits <- hits |>
       str_detect(main_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
       str_detect(main_genre, str_c(pop, collapse = "|")) ~ "Pop",
       str_detect(main_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
-      str_detect(main_genre, str_c(adult_contemporary, collapse = "|")) ~ "Adult Contemporary",
+      str_detect(main_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "Adult Contemporary",
       TRUE ~ "Other"
     )
   )
 
 #now let's examine the top genres again
 
-top_genres_agg <- hits |>
+top_genres_agg <- hits_master |>
   group_by(genre_agg) |>
   summarise(count = n()) |>
   arrange(desc(count))
@@ -107,7 +112,7 @@ top_genres_plot_agg <- top_genres_agg |>
 # Plot 1: bump plot comparing popularity of genres in five year intervals --------
 
 #create new dataframe showing average song popularity per genre per decade, and convert to a ranking variable for each genre
-genres_over_time <- hits |>
+genres_over_time <- hits_master |>
   mutate(decade = floor(year / 10) * 10) |>
   filter(decade != 2010) |>
   filter(genre_agg != 'Other') |>
@@ -159,7 +164,7 @@ bump_plot <- genres_over_time |>
 # Plot 2: features of hits and non hits -----------------------------------
 #create datasets with the average values of each musical characteristic for hits and non hits, then join and reshape
 
-hits_properties <- hits |>
+hits_properties <- hits_master |>
   mutate(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), as.numeric)) |>
   summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), mean, na.rm = TRUE))
 
@@ -211,10 +216,7 @@ hits_vs_not_plot <- hits_v_not |>
   xlab("Musical property") +
   ylab("Index value (0 to 1)")
 
-
-
-
-
+#INPROGRESS
 
 text_label <- hits_v_not |>
   ggplot(aes(x=diff,y=musical_feature)) +
@@ -238,3 +240,159 @@ text_label <- hits_v_not |>
     legend.position = "none"
   )+
   scale_color_manual(values=c("#436685", "#BF2F24"))
+
+
+
+# collaborations chord chart --------------------------
+
+#filter for collabs only
+collabs_only <- hits_master |>
+  select(c('id_artists','id_collaborators','name_artists')) |>
+  filter(id_collaborators != is.na(id_collaborators))
+
+#manually correct additional commas in names to we can separate out the artists and collaborators
+collabs_only[15,3] = 'Tyler The Creator, A$AP Rocky'
+collabs_only[68,3] <- 'The Hit Co., The Tribute Co.'
+collabs_only[137,3] <- 'The Hit Co., The Tribute Co.'
+collabs_only[158,3] <- 'The Hit Co., The Tribute Co.'
+collabs_only[161,3] <- 'Ray Parker Jr., Raydio'
+collabs_only[163,3] <- 'Ray Parker Jr., Raydio'
+collabs_only[164,3] <- 'Ray Parker Jr., Raydio'
+collabs_only[374,3] <- 'Earth Wind & Fire, The Emotions'
+
+#get genres for artist and collaborator from metadata table and filter only where both genres can be identified
+
+collabs_only <- collabs_only |>
+  separate(name_artists,c('artist', 'collaborator'), sep = ',') 
+
+collabs_only <- collabs_only |>
+  left_join(artist_meta, by = c('id_collaborators' = 'artist_id')) 
+
+collabs_only <- collabs_only |>
+  rename('collaborator_genre' = 'main_genre') |>
+  left_join(artist_meta, by = c('id_artists' = 'artist_id')) 
+
+collabs_only <- collabs_only |>
+  rename('artist_genre' = 'main_genre') |>
+  filter(artist_genre != "-" & collaborator_genre != "-")
+
+#aggregate the genres as before
+
+collabs_only <- collabs_only |>
+  mutate(artist_genre = str_to_lower(artist_genre)) |>
+  mutate(
+    genre_agg_artist = case_when(
+      str_detect(artist_genre, str_c(hip_hop, collapse = "|")) ~ "Hip-Hop",
+      str_detect(artist_genre, str_c(jazz_funk, collapse = "|")) ~ "Jazz/Funk",
+      str_detect(artist_genre, str_c(soul_randb, collapse = "|")) ~ "Soul/R&B",
+      str_detect(artist_genre, str_c(country, collapse = "|")) ~ "Country",
+      str_detect(artist_genre, str_c(blues, collapse = "|")) ~ "Blues",
+      str_detect(artist_genre, str_c(folk, collapse = "|")) ~ "Folk",
+      str_detect(artist_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
+      str_detect(artist_genre, str_c(pop, collapse = "|")) ~ "Pop",
+      str_detect(artist_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
+      str_detect(artist_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "Adult Contemporary",
+      TRUE ~ "Other")
+  ) |>
+  mutate(
+      genre_agg_collaborator = case_when(
+        str_detect(collaborator_genre, str_c(hip_hop, collapse = "|")) ~ "Hip-Hop",
+        str_detect(collaborator_genre, str_c(jazz_funk, collapse = "|")) ~ "Jazz/Funk",
+        str_detect(collaborator_genre, str_c(soul_randb, collapse = "|")) ~ "Soul/R&B",
+        str_detect(collaborator_genre, str_c(country, collapse = "|")) ~ "Country",
+        str_detect(collaborator_genre, str_c(blues, collapse = "|")) ~ "Blues",
+        str_detect(collaborator_genre, str_c(folk, collapse = "|")) ~ "Folk",
+        str_detect(collaborator_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
+        str_detect(collaborator_genre, str_c(pop, collapse = "|")) ~ "Pop",
+        str_detect(collaborator_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
+        str_detect(collaborator_genre, str_c(adult_contemporary, collapse = "|")) ~ "Adult Contemporary",
+        TRUE ~ "Other")
+  )
+  
+#create the adjacency matrix showing instances of collaboration between each genre
+
+included_genres <- c('Pop','Soul/R&B','Hip-Hop','Rock/Metal','Country','Electronic')
+
+adj_matrix <- collabs_only |>
+  select(c('genre_agg_artist','genre_agg_collaborator')) |>
+  filter(genre_agg_artist %in% included_genres & genre_agg_collaborator %in% included_genres) |>
+  rowwise() |>
+  mutate(pair = list(sort(c(genre_agg_artist, genre_agg_collaborator)))) |>
+  unnest_wider(pair, names_sep = "_") |>
+  count(pair_1, pair_2) |>
+  pivot_wider(names_from = pair_2, values_from = n, values_fill = 0) |>
+  column_to_rownames(var = "pair_1")
+
+#transform to long format
+
+adj_matrix_long <- adj_matrix |>
+  rownames_to_column() |>
+  gather(key = 'key', value = 'value', -rowname)
+
+# parameters
+circos.clear()
+circos.par(start.degree = 90, gap.degree = 4, track.margin = c(-0.1, 0.1), points.overflow.warning = FALSE)
+par(mar = rep(0, 4))
+
+# color palette
+mycolor <- viridis(6, alpha = 1, begin = 0, end = 1, option = "D")
+mycolor <- mycolor[sample(1:6)]
+
+sector_order <- c("Pop", "Hip-Hop", "Rock/Metal", "Soul/R&B", "Electronic", "Country","Jazz/Funk","Blues","Folk","Adult Contemporary")
+sector_order2 <- c("Pop", "Hip-Hop", "Rock/Metal", "Soul/R&B", "Country","Electronic")
+
+
+chordDiagram(
+  x = adj_matrix_long,
+  grid.col = mycolor,
+  order = included_genres,
+  transparency = 0.3,
+  directional = 1,  
+  direction.type = c("arrows", "diffHeight"),
+  diffHeight  = -0.04,
+  annotationTrack = "grid", 
+  annotationTrackHeight = c(0.05, 0.1),
+  link.arr.type = "big.arrow", 
+  link.sort = TRUE, 
+  link.largest.ontop = TRUE,
+  self.link = 1)
+
+circos.trackPlotRegion(
+  track.index = 1,
+  bg.border = NA,
+  panel.fun = function(x, y) {
+    xlim = get.cell.meta.data("xlim")
+    sector.index = get.cell.meta.data("sector.index")
+    
+    # Add axis for each sector
+    circos.axis(
+      h = "top",  # Place axis at the top of the track
+      major.at = seq(xlim[1], xlim[2], length.out = 5),  # Create 5 evenly spaced ticks
+      labels = round(seq(0, 1, length.out = 5), 2),  # Labels as proportions (0-1)
+      sector.index = sector.index,
+      labels.cex = 0.6,  # Reduce label size
+      minor.ticks = 1
+    )
+  }
+)
+
+
+circos.trackPlotRegion(
+  track.index = 1,
+  bg.border = NA,
+  panel.fun = function(x, y) {
+    xlim = get.cell.meta.data("xlim")
+    sector.index = get.cell.meta.data("sector.index")
+    
+    # Add axis for each sector
+    circos.axis(
+      h = "top",  # Place axis at the top of the track
+      major.at = seq(xlim[1], xlim[2], length.out = 5),  # Create 5 evenly spaced ticks
+      labels = round(seq(0, 1, length.out = 5), 2),  # Labels as proportions (0-1)
+      sector.index = sector.index,
+      labels.cex = 0.6,  # Reduce label size
+      minor.ticks = 1
+    )
+  }
+)
+
