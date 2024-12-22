@@ -10,6 +10,8 @@ library(hrbrthemes)
 library(ggbump)
 library(circlize)
 library(ComplexUpset)
+library(ggupset)
+library(tidytext)
 
 ## ---------------------------
 # Load in data ------------------------------------------------------------
@@ -247,7 +249,7 @@ text_label <- hits_v_not |>
 
 #filter for collabs only
 collabs_only <- hits_master |>
-  select(c('id_artists','id_collaborators','name_artists')) |>
+  select(c('id_artists','id_collaborators','name_artists','popularity')) |>
   filter(id_collaborators != is.na(id_collaborators))
 
 #manually correct additional commas in names to we can separate out the artists and collaborators
@@ -305,10 +307,14 @@ collabs_only <- collabs_only |>
         str_detect(collaborator_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
         str_detect(collaborator_genre, str_c(pop, collapse = "|")) ~ "Pop",
         str_detect(collaborator_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
-        str_detect(collaborator_genre, str_c(adult_contemporary, collapse = "|")) ~ "Adult Contemporary",
+        str_detect(collaborator_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "Adult Contemporary",
         TRUE ~ "Other")
   )
   
+
+#create flag for whether song is above or below the average popularity for that genre
+
+
 #create the adjacency matrix showing instances of collaboration between each genre
 
 included_genres <- c('Pop','Soul/R&B','Hip-Hop','Rock/Metal','Country','Electronic')
@@ -323,76 +329,48 @@ adj_matrix <- collabs_only |>
   pivot_wider(names_from = pair_2, values_from = n, values_fill = 0) |>
   column_to_rownames(var = "pair_1")
 
+
+  
+
+
+
 #transform to long format
 
 adj_matrix_long <- adj_matrix |>
   rownames_to_column() |>
   gather(key = 'key', value = 'value', -rowname)
 
-# parameters
-circos.clear()
-circos.par(start.degree = 90, gap.degree = 4, track.margin = c(-0.1, 0.1), points.overflow.warning = FALSE)
-par(mar = rep(0, 4))
+# Prepare data for ggupset
 
-# color palette
-mycolor <- viridis(6, alpha = 1, begin = 0, end = 1, option = "D")
-mycolor <- mycolor[sample(1:6)]
-
-sector_order <- c("Pop", "Hip-Hop", "Rock/Metal", "Soul/R&B", "Electronic", "Country","Jazz/Funk","Blues","Folk","Adult Contemporary")
-sector_order2 <- c("Pop", "Hip-Hop", "Rock/Metal", "Soul/R&B", "Country","Electronic")
-
-
-chordDiagram(
-  x = adj_matrix_long,
-  grid.col = mycolor,
-  order = included_genres,
-  transparency = 0.3,
-  directional = 1,  
-  direction.type = c("arrows", "diffHeight"),
-  diffHeight  = -0.04,
-  annotationTrack = "grid", 
-  annotationTrackHeight = c(0.05, 0.1),
-  link.arr.type = "big.arrow", 
-  link.sort = TRUE, 
-  link.largest.ontop = TRUE,
-  self.link = 1)
-
-circos.trackPlotRegion(
-  track.index = 1,
-  bg.border = NA,
-  panel.fun = function(x, y) {
-    xlim = get.cell.meta.data("xlim")
-    sector.index = get.cell.meta.data("sector.index")
-    
-    # Add axis for each sector
-    circos.axis(
-      h = "top",  # Place axis at the top of the track
-      major.at = seq(xlim[1], xlim[2], length.out = 5),  # Create 5 evenly spaced ticks
-      labels = round(seq(0, 1, length.out = 5), 2),  # Labels as proportions (0-1)
-      sector.index = sector.index,
-      labels.cex = 0.6,  # Reduce label size
-      minor.ticks = 1
-    )
-  }
-)
+adj_matrix_long <- arrange(adj_matrix_long, desc(value))
+upset_data <- adj_matrix_long |>
+  filter(value > 0) |>  # Only keep rows with non-zero collaborations
+  rowwise() |> 
+  mutate(genre_pair = list(sort(c(rowname, key)))) |>  # Create a sorted pair of genres
+  ungroup() |>
+  group_by(genre_pair) |>  
+  summarise(total_collabs = sum(value), .groups = "drop")  # Summarize total collaborations
 
 
-circos.trackPlotRegion(
-  track.index = 1,
-  bg.border = NA,
-  panel.fun = function(x, y) {
-    xlim = get.cell.meta.data("xlim")
-    sector.index = get.cell.meta.data("sector.index")
-    
-    # Add axis for each sector
-    circos.axis(
-      h = "top",  # Place axis at the top of the track
-      major.at = seq(xlim[1], xlim[2], length.out = 5),  # Create 5 evenly spaced ticks
-      labels = round(seq(0, 1, length.out = 5), 2),  # Labels as proportions (0-1)
-      sector.index = sector.index,
-      labels.cex = 0.6,  # Reduce label size
-      minor.ticks = 1
-    )
-  }
-)
+
+
+
+# Create the Upset plot
+ggplot(upset_data, aes(x = genre_pair, y = total_collabs)) +
+  geom_bar(stat = "identity") +  # Use bars to show collaboration totals
+  scale_x_upset(order_by = 'degree') +  # Convert x-axis to upset format
+  theme_ipsum_rc() +
+  labs(
+    title = "UpSet Plot of Genre Collaborations",
+    x = "Genre Collaborations",
+    y = "Number of Songs"
+  ) +
+  theme_combmatrix(combmatrix.label.text = element_text(family = 'Roboto Condensed', color = 'black', face = 'bold'))
+
+
+
+
+
+
+
 
