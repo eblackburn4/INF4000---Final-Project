@@ -125,12 +125,12 @@ genres_over_time <- hits_master |>
   mutate(ranking = dense_rank(desc(popularity))) |>
   ungroup()
 
-genre_focus <- c('Hip-Hop', 'Adult Contemporary', 'Rock/Metal', 'Pop', 'Electronic')
+genre_focus <- c('Hip-Hop', 'Country', 'Rock/Metal', 'Pop', 'Soul/R&B')
 
 bump_plot <- genres_over_time |>
   ggplot(aes(x = decade, y = ranking, group = genre_agg)) +
-    geom_bump(linewidth = 0.7, smooth = 6, color = 'gray90') +
-    geom_bump(aes(color = genre_agg), linewidth = 1.0,smooth = 6, 
+    geom_bump(linewidth = 0.9, smooth = 6, color = 'gray90') +
+    geom_bump(aes(color = genre_agg), linewidth = 1.5,smooth = 6, 
               data = ~. |> filter(genre_agg %in% genre_focus)) +
     geom_point(color = "white", size = 4) +
     geom_point(color = "gray90", size = 2) +
@@ -150,12 +150,14 @@ bump_plot <- genres_over_time |>
                   breaks = c(1960, 1970, 1980, 1990, 2000)) + 
     coord_cartesian(clip = "off") +
     labs(
-      title = "Average Popularity by Genre Over Decades",
+      title = "Popularity ranking of genres",
+      subtitle = "Average ranking by decade, 1960s - 2000s",
       x = "",
-      y = "Popularity Ranking",
-      color = "Genre"
+      y = "Popularity Ranking (1 = most popular)",
+      color = "Genre",
+      caption = "Data from MusicOset based on chart year-end scores. Top 10 overall most popular genres only."
       ) + 
-    theme_minimal() +
+    theme_ipsum_rc(grid = FALSE, ticks = TRUE) +
     theme(legend.position = "none",
           panel.grid = element_blank(),
           axis.ticks = element_line(),
@@ -202,21 +204,26 @@ hits_vs_not_plot <- hits_v_not |>
                    xend=reorder(musical_feature, diff), 
                    y=hits, yend=non_hits), 
                color="lightgrey", 
-               linewidth = 3.5) +
+               linewidth = 5.5) +
   geom_point(aes(x=reorder(musical_feature, diff), 
                  y=hits), 
-             color='chartreuse', 
-             size=3.5 ) +
+             color='#7ad151', 
+             size=6 ) +
   geom_point(aes(x=reorder(reorder(musical_feature, diff), diff), 
                  y=non_hits), 
-             color='red', 
-             size=3.5 ) +
+             color='#440154', 
+             size=6 ) +
   coord_flip() +
-  theme_ipsum() +
   scale_fill_discrete(labels=c('Hits','Non-hits')) +
-  theme(panel.grid.major.y = element_blank()) +
-  xlab("Musical property") +
-  ylab("Index value (0 to 1)")
+  theme(panel.grid.major.y = element_blank(),
+        legend.position = ) +
+  labs(title = 'Musical properties of artists\'\ charting vs. non-charting songs',
+       subtitle = '1960 - 2018, averaged across all genres',
+       caption = 'Data from MusicOset',
+       x = 'Index value (0 to 1, 1 = more)',
+       y = 'Musical property'
+       ) +
+  theme_ipsum_rc(axis_text_size = 11, axis_title_size = 10)
 
 #INPROGRESS
 
@@ -247,9 +254,13 @@ text_label <- hits_v_not |>
 
 # collaborations chord chart --------------------------
 
+#create flag for whether song is in the top 25% most popular songs
+hits_master <- hits_master |>
+  mutate(top_hit = ifelse(popularity >= quantile(popularity, 0.75),
+                          1, 0))
 #filter for collabs only
 collabs_only <- hits_master |>
-  select(c('id_artists','id_collaborators','name_artists','popularity')) |>
+  select(c('id_artists','id_collaborators','name_artists','popularity','top_hit')) |>
   filter(id_collaborators != is.na(id_collaborators))
 
 #manually correct additional commas in names to we can separate out the artists and collaborators
@@ -312,60 +323,59 @@ collabs_only <- collabs_only |>
   )
   
 
-#create flag for whether song is above or below the average popularity for that genre
 
 
-#create the adjacency matrix showing instances of collaboration between each genre
 
-included_genres <- c('Pop','Soul/R&B','Hip-Hop','Rock/Metal','Country','Electronic')
+#create the adjacency matrix showing summed instances of collaboration between each included genre
 
-adj_matrix <- collabs_only |>
-  select(c('genre_agg_artist','genre_agg_collaborator')) |>
-  filter(genre_agg_artist %in% included_genres & genre_agg_collaborator %in% included_genres) |>
+included_genres <- c('Pop','Soul/R&B','Hip-Hop','Rock/Metal','Country')
+
+adj_matrix_long <- collabs_only |>
+  filter(
+    genre_agg_artist %in% included_genres & 
+      genre_agg_collaborator %in% included_genres
+  ) |>
   rowwise() |>
   mutate(pair = list(sort(c(genre_agg_artist, genre_agg_collaborator)))) |>
   unnest_wider(pair, names_sep = "_") |>
-  count(pair_1, pair_2) |>
-  pivot_wider(names_from = pair_2, values_from = n, values_fill = 0) |>
-  column_to_rownames(var = "pair_1")
+  group_by(pair_1, pair_2) |>
+  summarise(
+    total_songs = n(),
+    top_hits = sum(top_hit, na.rm = TRUE),
+    top_hit_proportion = top_hits / total_songs,
+    .groups = "drop"
+  )
+  
 
-
+# Prepare data for upset chart by converting each genre pair into a list column
+upset_data <- adj_matrix_long |>
+  rowwise() |>  # Ensure row-wise operations for list column creation
+  mutate(genre_pair = list(c(pair_1, pair_2))) |>
+  ungroup() |>  
+  select(genre_pair, total_collabs = total_songs, hit_prop = top_hit_proportion  
+  ) |>
+  arrange(desc(total_collabs))
   
 
 
-
-#transform to long format
-
-adj_matrix_long <- adj_matrix |>
-  rownames_to_column() |>
-  gather(key = 'key', value = 'value', -rowname)
-
-# Prepare data for ggupset
-
-adj_matrix_long <- arrange(adj_matrix_long, desc(value))
-upset_data <- adj_matrix_long |>
-  filter(value > 0) |>  # Only keep rows with non-zero collaborations
-  rowwise() |> 
-  mutate(genre_pair = list(sort(c(rowname, key)))) |>  # Create a sorted pair of genres
-  ungroup() |>
-  group_by(genre_pair) |>  
-  summarise(total_collabs = sum(value), .groups = "drop")  # Summarize total collaborations
-
-
-
-
-
 # Create the Upset plot
-ggplot(upset_data, aes(x = genre_pair, y = total_collabs)) +
-  geom_bar(stat = "identity") +  # Use bars to show collaboration totals
-  scale_x_upset(order_by = 'degree') +  # Convert x-axis to upset format
+ggplot(upset_data, aes(x = genre_pair)) +
+  geom_bar(aes(y = total_collabs, fill = 'Other charting songs'), stat = "identity") +
+  geom_col(aes(y = total_collabs * hit_prop, fill = 'Top hits'), position = "identity") +
+  scale_x_upset(order_by = 'degree') +
   theme_ipsum_rc() +
   labs(
-    title = "UpSet Plot of Genre Collaborations",
-    x = "Genre Collaborations",
-    y = "Number of Songs"
+    title = 'Frequency of collaborations on Billboard hot 100 songs',
+    subtitle = '1960 to 2018, across the top 5 most popular genres',
+    x = 'Genre pairs',
+    y = "Number of collaborations",
+    fill = "",
+    Caption = 'Data from MusicOSet. Top hits includes any songs in the upper quartile of popularity score'
   ) +
-  theme_combmatrix(combmatrix.label.text = element_text(family = 'Roboto Condensed', color = 'black', face = 'bold'))
+  theme(legend.position = 'right',
+        legend.text = element_text(size = 11, family = 'Roboto Condensed')) +
+  theme_combmatrix(combmatrix.label.text = element_text(family = 'Roboto Condensed', color = 'black', face = 'bold', size = 11)) +
+  scale_fill_viridis_d()
 
 
 
