@@ -12,6 +12,8 @@ library(circlize)
 library(ComplexUpset)
 library(ggupset)
 library(tidytext)
+library(ggridges)
+
 
 ## ---------------------------
 # Load in data ------------------------------------------------------------
@@ -168,91 +170,72 @@ bump_plot <- genres_over_time |>
 # Plot 2: features of hits and non hits -----------------------------------
 #create datasets with the average values of each musical characteristic for hits and non hits, then join and reshape
 
-hits_properties <- hits_master |>
+hits_properties_6080 <- hits_master |>
+  filter(year >= 1960 & year <= 1989) |>
   mutate(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), as.numeric)) |>
-  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), mean, na.rm = TRUE))
+  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), mean, na.rm = TRUE)) |>
+  rename_with(~str_to_title(.))
+
+hits_properties_9020 <- hits_master |>
+  filter(year >= 1990 & year <= 2020) |>
+  mutate(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), as.numeric)) |>
+  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), mean, na.rm = TRUE)) |>
+  rename_with(~str_to_title(.))
 
 non_hits_properties <- non_hits |>
   mutate(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), as.numeric)) |>
-  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), mean, na.rm = TRUE))
+  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, liveness, speechiness), mean, na.rm = TRUE)) |>
+  rename_with(~str_to_title(.))
+
 
 #reshaping the dataframe for plotting, also calculating the differences between hits/non hits so we can order the graph better
 
-hits_v_not <- bind_rows(hits_properties,non_hits_properties, .id = 'type') |>
+hits_v_not <- bind_rows(hits_properties_6080,hits_properties_9020, non_hits_properties, .id = 'type') |>
   pivot_longer(cols = 2:8, names_to = "musical_feature", values_to = "average_value") |>
   pivot_wider(names_from = type ,values_from = average_value) |>
-  rename('hits' = 2, 'non_hits' = 3) |>
-  mutate(diff = hits - non_hits) |>
+  rename('hits_6089' = 2, 'hits_9020' = 3, 'non_hits' = 4) |>
+  mutate(diff = hits_9020 - hits_6089) |>
+  mutate(diffbin = ifelse(hits_9020 - hits_6089 > 0 , 'A','B')) |>
   mutate(musical_feature = as.factor(musical_feature)) |>
-  group_by(musical_feature) |>
-  mutate(max=max(hits, non_hits)) |>
-  mutate(musical_feature=fct_reorder(musical_feature, diff)) |>
-  ungroup() 
+  group_by(musical_feature)
 
-hits_v_not <- hits_v_not |>
-  mutate(diff_max=if_else(hits_v_not$hits==max, "Hits","Non-hits"),
-         diff_label= paste0("+", abs(diff), diff_max) |>
-         fct_inorder())
 
-  
 
-#plot the final lollipop chart, adding data labels to each point and a text geom on the right to show the percentage difference
+#plot the final lollipop charts for hits from 1990-2020 and then from 1960-1980
 
 hits_vs_not_plot <- hits_v_not |> 
   ggplot() +
   geom_segment(aes(x=reorder(musical_feature, diff), 
                    xend=reorder(musical_feature, diff), 
-                   y=hits, yend=non_hits), 
-               color="lightgrey", 
-               linewidth = 5.5) +
+                   y=hits_9020, yend=hits_6089, color = diffbin), 
+               linewidth = 8.5, alpha = 1) +
   geom_point(aes(x=reorder(musical_feature, diff), 
-                 y=hits), 
-             color='#7ad151', 
-             size=6 ) +
+                 y=hits_9020, fill = 'Hits_9020'), 
+             size=8 , shape = 23) +
+  geom_point(aes(x=reorder(musical_feature, diff), 
+                 y=hits_6089, fill = 'Hits_6089'), 
+             size=8 , shape = 23) +
   geom_point(aes(x=reorder(reorder(musical_feature, diff), diff), 
-                 y=non_hits), 
-             color='#440154', 
-             size=6 ) +
+                 y=non_hits, fill = 'Non-hits'), 
+             size=5.5, shape = 21) +
   coord_flip() +
-  scale_fill_discrete(labels=c('Hits','Non-hits')) +
-  theme(panel.grid.major.y = element_blank(),
-        legend.position = ) +
   labs(title = 'Musical properties of artists\'\ charting vs. non-charting songs',
-       subtitle = '1960 - 2018, averaged across all genres',
-       caption = 'Data from MusicOset',
-       x = 'Index value (0 to 1, 1 = more)',
-       y = 'Musical property'
-       ) +
-  theme_ipsum_rc(axis_text_size = 11, axis_title_size = 10)
-
-#INPROGRESS
-
-text_label <- hits_v_not |>
-  ggplot(aes(x=diff,y=musical_feature)) +
-  geom_text(aes(x=0, label=gap_label, color=gap_party_max),
-            fontface="bold",
-            size=3.25) +
-  
-  geom_text(aes(x=0, y=7), # 7 because that's the # of y-axis values
-            label="Diff",
-            nudge_y =.5, # match the nudge value of the main plot legend    
-            fontface="bold",
-            size=3.25) +
-  
-  theme_void() +
-  coord_cartesian(xlim = c(-.05, 0.05), 
-                  ylim=c(1,7.5) # needs to match main plot
-  )+
-  theme(
-    plot.margin = margin(l=0, r=0, b=0, t=0), #otherwise it adds too much space
-    panel.background = element_rect(fill="#EFEFE3", color="#EFEFE3"),
-    legend.position = "none"
-  )+
-  scale_color_manual(values=c("#436685", "#BF2F24"))
+       subtitle = 'Hit songs are more energetic, happy and vocal-led',
+       caption = 'Data from 1960-2018, averaged across all genres',
+       y = 'Index value (0 to 1, 1 = more of that feature)',
+       x = ''
+  ) +
+  theme_ipsum_rc(grid = 'X,x', ticks = TRUE) +
+  theme(legend.position = 'bottom',
+        legend.title = element_blank()) +
+  scale_fill_manual(values = c('Hits_9020' = '#fde725', 'Hits_6089' = '#440154', 'Non-hits' = 'white')) +
+  scale_color_manual(values = c('B' = '#ea9bfd','A' ='#ffff66'), guide = 'none')
 
 
 
-# collaborations chord chart --------------------------
+
+
+# collaborations upset chart --------------------------
 
 #create flag for whether song is in the top 25% most popular songs
 hits_master <- hits_master |>
