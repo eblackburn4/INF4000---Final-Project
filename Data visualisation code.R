@@ -31,12 +31,14 @@ artist_meta <- artist_meta |>
   select(artist_id, main_genre)
 
 #read in song popularity data
+
 song_pop <- read_delim("Data/musicoset_popularity/song_pop.csv", delim = "\t") |>
   arrange(year) |>
   select(song_id, year_end_score) |>
   distinct(song_id, .keep_all = TRUE)
 
 #read in data on musical fingerprints, drop unneeded columns
+
 song_features <- read_delim("Data/musicoset_songfeatures/acoustic_features.csv", delim = "\t") |>
   select(-c(duration_ms,key,mode,time_signature)) |>
   drop_na()
@@ -126,6 +128,7 @@ non_hits <- non_hits |>
   filter(!if_any(all_of(non_hits_subset), ~ . == "-"))
 
 #combine loudness column from both hits and non-hits so that they can be rescaled to between 0 and 1 consistently 
+
 loudness_hits <- hits_master |>
   select(song_id,loudness) |>
   mutate(source = 'hits')
@@ -135,6 +138,7 @@ loudness_nonhits <- non_hits |>
   mutate(source = 'nonhits')
 
 #rescale loudness values, then join back into individual hits/non-hits datasets
+
 loudness_combined <- bind_rows(loudness_hits,loudness_nonhits) |>
   mutate(loudness_scaled = ((loudness - min(loudness)) / (max(loudness) - min(loudness)))) |>
   select(song_id, loudness_scaled )
@@ -219,6 +223,7 @@ hits_master <- hits_master |>
 # Figure 1: bump plot comparing popularity of genres by decade --------
 
 #create new dataframe showing average song popularity per genre per decade, and convert to a ranking variable for each genre
+
 genres_over_time <- hits_master |>
   mutate(decade = floor(release_year / 10) * 10) |>
   filter(genre_agg != 'Other') |>
@@ -322,6 +327,7 @@ hits_v_not <- bind_rows(hits_properties_pre91,hits_properties_post91, non_hits_p
   group_by(musical_feature) 
 
 #Create vector of axis labels
+
 fig1labels <- c('Valence','Acousticness','Danceability','Speechiness','Loudness','Energy')
 
 
@@ -365,12 +371,10 @@ Figure1 <- hits_v_not |>
   scale_color_manual(values = c('B' = '#ea9bfd','A' ='#fce890'), guide = 'none')
 
 
-
-
-
 # Figure 3. collaborations upset chart --------------------------
 
-#filter for collabs only
+#filter for collaborations only
+
 collabs_only <- hits_master |>
   select(c('artist1_id','artist2_id','artist1_name','artist2_name','popularity','era')) |>
   filter(artist2_id != is.na(artist2_id)) |>
@@ -446,6 +450,7 @@ adj_matrix_long <- collabs_only |>
   
 
 # Prepare data for upset chart by converting each genre pair into a list column
+
 upset_data <- adj_matrix_long |>
   rowwise() |>  
   mutate(genre_pair = list(c(pair_1, pair_2))) |>
@@ -455,6 +460,7 @@ upset_data <- adj_matrix_long |>
   
 
 # Create the Upset plot
+
 Figure2 <- ggplot(upset_data, aes(x = genre_pair)) +
   geom_col(aes(y = total_collabs, fill = '1991-2019'), position = "identity") +
   geom_col(aes(y = total_collabs - (total_collabs * post91_proportion), fill = '1962-1990'), position = "dodge2") +
@@ -558,8 +564,6 @@ seasonal_release_volume <- hits_by_month |>
 #combine plots into a single figure
 
 Figure4 <- (seasonal_release_popularity/seasonal_release_volume) + plot_layout(axes = 'collect_x', heights = c(2.4,1)) 
-
-
 
 #using patchwork to stitch the plots together. I ended up doing this manually for the final report as patchwork couldn't avoid squashing the plot areas,
 #but leaving the code in in case whoever's marking needs to verify what it looks like
