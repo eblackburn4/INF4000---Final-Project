@@ -38,7 +38,7 @@ song_pop <- read_delim("Data/musicoset_popularity/song_pop.csv", delim = "\t") |
 
 #read in data on musical fingerprints, drop unneeded columns
 song_features <- read_delim("Data/musicoset_songfeatures/acoustic_features.csv", delim = "\t") |>
-  select(-c(duration_ms,key,mode,time_signature,tempo)) |>
+  select(-c(duration_ms,key,mode,time_signature)) |>
   drop_na()
 
 #read in song metadata. This particular CSV isn't formatted properly so will require additional cleaning steps
@@ -145,6 +145,26 @@ hits_master <- hits_master |>
 non_hits <- non_hits |>
   left_join(loudness_combined, by = 'song_id')
 
+#do the same for tempo
+
+tempo_hits <- hits_master |>
+  select(song_id, tempo) |>
+  mutate(source = 'hits')
+
+tempo_nonhits <- non_hits |>
+  select(song_id,tempo) |>
+  mutate(source = 'nonhits') |>
+  mutate(tempo = as.numeric(tempo))
+
+tempo_combined <- bind_rows(tempo_hits,tempo_nonhits) |>
+  mutate(tempo_scaled = ((tempo - min(tempo)) / (max(tempo) - min(tempo)))) |>
+  select(song_id, tempo_scaled )
+
+hits_master <- hits_master |>
+  left_join(tempo_combined, by = 'song_id')
+
+non_hits <- non_hits |>
+  left_join(tempo_combined, by = 'song_id')
 
 # 0.5: EDA and additional data processing ---------------------------------------------------------------------
 #explore top genres across the dataset (other than 'no genre' which is #1)
@@ -191,27 +211,12 @@ hits_master <- hits_master |>
       str_detect(main_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
       str_detect(main_genre, str_c(pop, collapse = "|")) ~ "Pop",
       str_detect(main_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
-      str_detect(main_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "Adult Contemporary",
+      str_detect(main_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "MOR/Classical",
       TRUE ~ "Other"
     )
   )
 
-#now let's examine the top genres again
-
-top_genres_agg <- hits_master |>
-  group_by(genre_agg) |>
-  summarise(count = n()) |>
-  arrange(desc(count))
-
-top_genres_plot_agg <- top_genres_agg |>
-  mutate(genre_agg = fct_reorder(genre_agg, count, .desc = TRUE)) |>
-  ggplot(aes(x = genre_agg, y= count)) +
-  geom_col(fill = 'chartreuse') +
-  theme_ipsum_rc() +
-  scale_fill_viridis_d()
-
-
-# 1: bump plot comparing popularity of genres by decade --------
+# Figure 1: bump plot comparing popularity of genres by decade --------
 
 #create new dataframe showing average song popularity per genre per decade, and convert to a ranking variable for each genre
 genres_over_time <- hits_master |>
@@ -224,10 +229,10 @@ genres_over_time <- hits_master |>
   mutate(ranking = dense_rank(desc(popularity))) |>
   ungroup()
 
-#highlight the top 5 most popular genres for the graph
+#highlight the top 5 most popular modern-day genres for the graph
 genre_focus <- c('Hip-Hop', 'Country', 'Rock/Metal', 'Pop', 'Soul/R&B')
 
-bump_plot <- genres_over_time |>
+Figure3 <- genres_over_time |>
   ggplot(aes(x = decade, y = ranking, group = genre_agg)) +
     geom_bump(linewidth = 0.9, smooth = 6, color = 'gray90') +
     geom_bump(aes(color = genre_agg), linewidth = 1.5,smooth = 6, 
@@ -242,112 +247,128 @@ bump_plot <- genres_over_time |>
               hjust = 0,
               color = "gray30", 
               family = 'Roboto Condensed',
-              size = 3.5,
+              size = 4,
               data = ~. |> slice_max(decade, by = genre_agg) |> 
                 filter(!genre_agg %in% genre_focus)) +
     geom_text(aes(label = genre_agg), x = 2012, 
               hjust = 0,
               color = "black", 
-              size = 3.5, 
+              size = 4, 
               fontface = 'bold', 
               family = 'Roboto Condensed',
               data = ~. |> slice_max(decade, by = genre_agg) |> 
                 filter(genre_agg %in% genre_focus)) +
     scale_x_continuous(
-      limits = c(1959, 2021), 
+      limits = c(1959, 2019), 
       expand = c(0.01, 0),
       breaks = c(1960, 1970, 1980, 1990, 2000, 2010),
       labels = c("1960s", "1970s", "1980s", "1990s", "2000s","2010s")
     ) + 
     coord_cartesian(clip = "off") +
     labs(
-      title = "How have the most popular genres changed over time?",
-      subtitle = "The 1980s-1990s transition saw a dramatic shift in genre popularity with the emergence of hip hop and electronic music",
-      x = '',
+      title = "Figure 3: how has relative genre popularity changed over time?",
+      subtitle = "The 1980s-1990s transition saw a dramatic shift in genre popularity with the emergence of hip-hop",
+      x = 'Decade',
       y = "Popularity Ranking (1 = most popular)",
       color = "Genre",
-      caption = "Rankings based on the number and popularity of charting songs in each genre in each decade"
+      caption = "Rankings based on a combination of the frequency and popularity of charting songs in each genre, in each decade"
       ) + 
-    theme_ipsum_rc(grid = FALSE, ticks = TRUE,
-                   plot_margin = margin(2, 2, 2, 2)) +
+    theme_ipsum_rc(grid = '', ticks = FALSE,
+                   plot_margin = margin(10, 10, 10, 10),
+                   axis_text_size = 12,
+                   plot_title_size = 16,
+                   subtitle_size = 14,
+                   caption_size = 11,
+                   axis_title_size = 12) +
     theme(legend.position = "none",
           panel.grid = element_blank(),
           axis.ticks.y = element_blank(),
-          axis.ticks.x = element_line(),
-          axis.text.x = element_text(margin = margin(t = 5), size = 10), 
-          axis.text.y = element_text(margin = margin(r = -5), size = 10),
+          axis.text.x = element_text(margin = margin(t = 5)), 
+          axis.text.y = element_text(margin = margin(r = -5)),
           axis.title.y = element_text(margin = margin(r = 15)),
+          axis.title.x = element_text(hjust = 0, vjust = -2),
+          plot.caption = element_text(vjust = -1)
           ) +
     scale_colour_viridis_d(option = 'H')
 
-# 2: features of hits and non hits -----------------------------------
+# Figure 2: features of hits and non hits -----------------------------------
 #create datasets with the average values of each musical characteristic for hits and non hits, then join and reshape
 
 hits_properties_pre91 <- hits_master |>
   filter(release_year >= 1962 & release_year <= 1990) |>
-  mutate(across(c(energy, danceability, valence, acousticness, liveness, speechiness, loudness_scaled), as.numeric)) |>
-  summarise(across(c(energy, danceability, valence, acousticness, liveness, speechiness, loudness_scaled), mean, na.rm = TRUE))
+  mutate(across(c(energy, danceability, valence, acousticness, instrumentalness, tempo_scaled, speechiness, loudness_scaled), as.numeric)) |>
+  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, tempo_scaled, speechiness, loudness_scaled), mean, na.rm = TRUE))
 
 hits_properties_post91 <- hits_master |>
   filter(release_year >= 1991 & release_year <= 2019) |>
-  mutate(across(c(energy, danceability, valence, acousticness, liveness, speechiness, loudness_scaled), as.numeric)) |>
-  summarise(across(c(energy, danceability, valence, acousticness, liveness, speechiness, loudness_scaled), mean, na.rm = TRUE))
+  mutate(across(c(energy, danceability, valence, acousticness, instrumentalness, tempo_scaled, speechiness, loudness_scaled), as.numeric)) |>
+  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, tempo_scaled, speechiness, loudness_scaled), mean, na.rm = TRUE))
 
 
 non_hits_properties <- non_hits |>
-  summarise(across(c(energy, danceability, valence, acousticness, liveness, speechiness, loudness_scaled), mean, na.rm = TRUE))
+  summarise(across(c(energy, danceability, valence, acousticness, instrumentalness, tempo_scaled, speechiness, loudness_scaled), mean, na.rm = TRUE))
 
 
 #reshaping the dataframe for plotting, also calculating the differences between hits/non hits so we can order the graph better
 
 hits_v_not <- bind_rows(hits_properties_pre91,hits_properties_post91, non_hits_properties, .id = 'type') |>
-  pivot_longer(cols = 2:8, names_to = "musical_feature", values_to = "average_value") |>
+  select(-c(instrumentalness, tempo_scaled)) |>
+  pivot_longer(cols = 2:7, names_to = "musical_feature", values_to = "average_value") |>
   pivot_wider(names_from = type ,values_from = average_value) |>
   rename('hits_6290' = 2, 'hits_9119' = 3, 'non_hits' = 4) |>
   mutate(diff = hits_9119 - hits_6290) |>
   mutate(diffbin = ifelse(hits_9119 - hits_6290 > 0 , 'A','B')) |>
   mutate(musical_feature = as.factor(musical_feature)) |>
-  group_by(musical_feature)
+  group_by(musical_feature) 
 
+#Create vector of axis labels
+fig1labels <- c('Valence','Acousticness','Danceability','Speechiness','Loudness','Energy')
 
 
 #plot the final lollipop charts for hits from 1990-2020 and then from 1960-1980
 
-hits_vs_not_plot <- hits_v_not |> 
+Figure1 <- hits_v_not |> 
   ggplot() +
   geom_segment(aes(x=reorder(musical_feature, diff), 
                    xend=reorder(musical_feature, diff), 
                    y=hits_9119, yend=hits_6290, color = diffbin), 
-               linewidth = 9, alpha = 1) +
+               linewidth = 11.5, alpha = 1) +
   geom_point(aes(x=reorder(musical_feature, diff), 
                  y=hits_9119, fill = 'Hits_9119'), 
-             size=7 , shape = 23) +
+             size=9.5 , shape = 23, alpha = 1) +
   geom_point(aes(x=reorder(musical_feature, diff), 
-                 y=hits_6290, fill = 'Hits_9119'), 
-             size=7 , shape = 23) +
+                 y=hits_6290, fill = 'Hits_6290'), 
+             size=9.5 , shape = 23, alpha = 1) +
   geom_point(aes(x=reorder(reorder(musical_feature, diff), diff), 
                  y=non_hits, fill = 'Non-hits'), 
-             size=4.5, shape = 21) +
+             size= 6.5, shape = 21) +
+  scale_x_discrete(labels = fig1labels) +
   coord_flip() +
-  labs(title = 'How do popular song features compare to non-hits, and across eras?',
-       subtitle = 'Post-1991 charting songs are louder, more energetic and more electronic',
-       caption = 'Average score across all genres. Non-hits data taken from across both eras.',
+  labs(title = 'Figure 1: how do popular song features compare to non-hits, and across eras?',
+       subtitle = 'Post-1991 charting songs are louder, sadder, more energetic and more electronic',
+       caption = 'Based on average feature scores across all songs. Non-hits data taken from across both eras.',
        y = 'Index value (0 to 1, 1 = more of that feature)',
        x = ''
   ) +
-  theme_ipsum_rc(grid = 'Xx', ticks = TRUE,
-                 plot_margin = margin(2, 2, 2, 2)) +
+  theme_ipsum_rc(grid = 'Xx', ticks = FALSE,
+                 plot_margin = margin(10, 10, 10, 10),
+                 axis_text_size = 12,
+                 plot_title_size = 16,
+                 subtitle_size = 14,
+                 caption_size = 11) +
   theme(legend.position = 'bottom',
-        legend.title = element_blank()) +
-  scale_fill_manual(values = c('Hits_9119' = '#fde725', 'Hits_6290' = '#440154', 'Non-hits' = 'white'),
-                    labels = c('1962-1989 charting','1990-2019 charting','Non-charting')) +
-  scale_color_manual(values = c('B' = '#ea9bfd','A' ='#ffff66'), guide = 'none')
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        axis.title.x = element_text(vjust = -2, size = 12)) +
+  scale_fill_manual(values = c('Hits_9119' = '#fde725', 'Hits_6290' = '#440154', 'Non-hits' = 'grey95'),
+                    labels = c('1962-1990 charting songs','1991-2019 charting songs','Non-charting songs')) +
+  scale_color_manual(values = c('B' = '#ea9bfd','A' ='#fce890'), guide = 'none')
 
 
 
 
 
-# 3. collaborations upset chart --------------------------
+# Figure 3. collaborations upset chart --------------------------
 
 #filter for collabs only
 collabs_only <- hits_master |>
@@ -383,7 +404,7 @@ collabs_only <- collabs_only |>
       str_detect(artist1_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
       str_detect(artist1_genre, str_c(pop, collapse = "|")) ~ "Pop",
       str_detect(artist1_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
-      str_detect(artist1_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "Adult Contemporary",
+      str_detect(artist1_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "MOR/Classical",
       TRUE ~ "Other")
   ) |>
   mutate(
@@ -397,14 +418,14 @@ collabs_only <- collabs_only |>
         str_detect(artist2_genre, str_c(rock_metal, collapse = "|")) ~ "Rock/Metal",
         str_detect(artist2_genre, str_c(pop, collapse = "|")) ~ "Pop",
         str_detect(artist2_genre, str_c(electronic, collapse = "|")) ~ "Electronic",
-        str_detect(artist2_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "Adult Contemporary",
+        str_detect(artist2_genre, str_c(adult_contemporary_classical, collapse = "|")) ~ "MOR/Classical",
         TRUE ~ "Other")
   )
   
 
 #create the adjacency matrix showing summed instances of collaboration between each included genre
 
-included_genres <- c('Pop','Soul/R&B','Hip-Hop','Rock/Metal','Adult Contemporary')
+included_genres <- c('Pop','Soul/R&B','Hip-Hop','Rock/Metal','MOR/Classical')
 
 adj_matrix_long <- collabs_only |>
   filter(
@@ -426,7 +447,7 @@ adj_matrix_long <- collabs_only |>
 
 # Prepare data for upset chart by converting each genre pair into a list column
 upset_data <- adj_matrix_long |>
-  rowwise() |>  # Ensure row-wise operations for list column creation
+  rowwise() |>  
   mutate(genre_pair = list(c(pair_1, pair_2))) |>
   ungroup() |>  
   select(genre_pair, total_collabs = total_songs, post91_proportion) |>
@@ -434,36 +455,39 @@ upset_data <- adj_matrix_long |>
   
 
 # Create the Upset plot
-upset_plot <- ggplot(upset_data, aes(x = genre_pair)) +
-  geom_col(aes(y = total_collabs, fill = '1991-2018'), position = "identity") +
+Figure2 <- ggplot(upset_data, aes(x = genre_pair)) +
+  geom_col(aes(y = total_collabs, fill = '1991-2019'), position = "identity") +
   geom_col(aes(y = total_collabs - (total_collabs * post91_proportion), fill = '1962-1990'), position = "dodge2") +
   scale_x_upset(order_by = 'degree') +
-  theme_ipsum_rc(grid = 'Y', axis_title_size = 11,
-                 plot_margin = margin(2, 2, 2, 2)) +
+  theme_ipsum_rc(grid = 'Y',
+                 plot_margin = margin(10, 10, 10, 10),
+                 axis_text_size = 12,
+                 axis_title_size = 12,
+                 plot_title_size = 16,
+                 subtitle_size = 14,
+                 caption_size = 11) +
   scale_y_continuous(breaks = seq(0,200,40)) +
   labs(
-    title = 'Which genres collaborate the most, and in which era?',
-    subtitle = 'The number of charting collaborations increased markedly post-1991, particularly across Pop and Hip-Hop',
-    x = 'Collaborations (including top 5 genres with most collaborations)',
+    title = 'Figure 2: which genres collaborate the most, and in which era?',
+    subtitle = 'The number of charting collaborations increased markedly post-1991, particularly across pop and hip-hop',
+    x = 'Genre of collaborator (top 5 most collaborative genres only)',
     y = "Number of charting collaborations",
-    fill = "Release Date",
-    Caption = 'Data from MusicOSet. Top hits includes any songs in the upper quartile of popularity score'
-  ) +
+    fill = "Release Date") +
   theme(
-    legend.position = c(0.92, 0.89), # Position legend at top-right
-    legend.box.background = element_rect(color = "black", fill = "white"), # White box with black outline
-    legend.box.margin = margin(5, 5, 5, 5), # Add some padding to the box
-    legend.title = element_text(face = "bold"), # Bold legend title
-    legend.text = element_text(size = 10),
-    axis.title.y = element_text(vjust = -25)# Adjust text size
+    legend.position = c(0.92, 0.89), 
+    legend.box.background = element_rect(color = "black", fill = "white"), 
+    legend.box.margin = margin(5, 5, 5, 5),
+    legend.text = element_text(size = 12),
+    axis.title.y = element_text(vjust = -17),
+    axis.title.x = element_text(vjust = -2)
   )  +
-  theme_combmatrix(combmatrix.label.text = element_text(family = 'Roboto Condensed', color = 'black', face = 'bold', size = 11),
+  theme_combmatrix(combmatrix.label.text = element_text(family = 'Roboto Condensed', color = 'black', size = 12),
                    combmatrix.panel.margin = unit(c(-10, 0), "pt"),
                    combmatrix.label.total_extra_spacing = unit(5, "pt")) +
-  scale_fill_viridis_d(direction = -1)
+  scale_fill_viridis_d(direction = 1)
 
 
-# 4. chart comparing seasonality effects on release volumes and popularity across eras --------
+# Figure 4. chart comparing seasonality effects on release volumes and popularity across eras --------
 
 #join month-precise release date info to hits dataset on song_id, dropping any songs that don't have a match and dropping unneeded columns
 #I've also made the (opinionated) choice to remove all songs released on the first of january - this is clearly a default date given when the real release date isn't known
@@ -484,7 +508,7 @@ hits_by_month <- hits_master |>
   )))
 
 
-#create the final tile and bar plots
+#create the final line and bar plots
 
 # line plot showing average popularity by month
 
@@ -493,31 +517,45 @@ seasonal_release_popularity <- hits_by_month |>
   geom_line(aes(color = era)) +
   geom_point(aes(color = era),size = 3) +
   theme_ipsum_rc(grid = 'XY',
-                 plot_margin = margin(2, 2,2, 2)) +
+                 plot_margin = margin(2,10,10,10),
+                 axis_text_size = 12,
+                 axis_title_size = 12,
+                 plot_title_size = 16,
+                 subtitle_size = 14,
+                 caption_size = 11) +
   theme(legend.position = 'none',
         axis.title.x = element_blank(),
         axis.text = element_text(size = 10),
-        axis.text.y = element_text(hjust = 1),
+        axis.title.y = element_text(vjust = 3)
         ) +
-  labs(title = 'Average popularity and number of releases, by month',
-       subtitle = 'Most songs are released in July, but the most popular are released in April',
+  labs(title = 'Figure 4: how do seasonal release volumes and popularity compare across eras?',
+       subtitle = 'Seasonal patterns are similar across both eras; April is a low point for both popularity and number of releases',
        y = 'Average popularity score') +
   scale_colour_manual(values = c('1962-1990' = '#440154', '1991-2019' = '#fce303')) 
 
 seasonal_release_volume <- hits_by_month |>
   ggplot(aes(x = release_month, y = releases_prop, group = era, color = era, fill = era)) +
   geom_col(position = 'dodge') +
-  theme_ipsum_rc(grid = 'XY') +
+  theme_ipsum_rc(grid = 'XY',
+                 plot_margin = margin(2,10,10,10),
+                 axis_text_size = 12,
+                 axis_title_size = 12,
+                 plot_title_size = 16,
+                 subtitle_size = 14,
+                 caption_size = 11) +
   labs(y = '% of total releases',
        x = 'Release month',
        fill = 'Era',
        color = 'Era') +
   theme(legend.position = 'bottom',
-        plot.margin = margin(2,2,2,2)) +
+        axis.title.y = element_text(vjust = 3),
+        axis.title.x = element_text(vjust = -3),
+        legend.text = element_text(size = 12)) +
   scale_y_continuous(labels = percent) +
   scale_color_viridis_d() +
   scale_fill_viridis_d()
   
+#combine plots into a single figure
 
 Figure4 <- (seasonal_release_popularity/seasonal_release_volume) + plot_layout(axes = 'collect_x', heights = c(2.4,1)) 
 
@@ -527,44 +565,4 @@ Figure4 <- (seasonal_release_popularity/seasonal_release_volume) + plot_layout(a
 #but leaving the code in in case whoever's marking needs to verify what it looks like
 
 (hits_vs_not_plot + upset_plot) / (bump_plot + Figure4)
-
-
-hits_vs_not_plot2 <- hits_v_not |> 
-  ggplot() +
-  geom_segment(aes(x = reorder(musical_feature, diff), 
-                   xend = reorder(musical_feature, diff), 
-                   y = hits_9119, yend = hits_6290, color = diffbin), 
-               linewidth = 9, alpha = 1) +
-  geom_errorbar(aes(x = reorder(musical_feature, diff), 
-                    ymin = hits_9119_lower, ymax = hits_9119_upper), 
-                width = 0.2, color = '#fde725', alpha = 0.7) + # Error bars for hits_9119
-  geom_errorbar(aes(x = reorder(musical_feature, diff), 
-                    ymin = hits_6290_lower, ymax = hits_6290_upper), 
-                width = 0.2, color = '#440154', alpha = 0.7) + # Error bars for hits_6290
-  geom_errorbar(aes(x = reorder(musical_feature, diff), 
-                    ymin = non_hits_lower, ymax = non_hits_upper), 
-                width = 0.2, color = 'gray', alpha = 0.7) + # Error bars for non-hits
-  geom_point(aes(x = reorder(musical_feature, diff), 
-                 y = hits_9119, fill = 'Hits_9119'), 
-             size = 7 , shape = 23) +
-  geom_point(aes(x = reorder(musical_feature, diff), 
-                 y = hits_6290, fill = 'Hits_6290'), 
-             size = 7 , shape = 23) +
-  geom_point(aes(x = reorder(musical_feature, diff), 
-                 y = non_hits, fill = 'Non-hits'), 
-             size = 4.5, shape = 21) +
-  coord_flip() +
-  labs(title = 'How do popular song features compare to non-hits, and across eras?',
-       subtitle = 'Post-1991 charting songs are louder, more energetic and more electronic',
-       caption = 'Average score across all genres. Non-hits data taken from across both eras.',
-       y = 'Index value (0 to 1, 1 = more of that feature)',
-       x = ''
-  ) +
-  theme_ipsum_rc(grid = 'Xx', ticks = TRUE,
-                 plot_margin = margin(2, 2, 2, 2)) +
-  theme(legend.position = 'bottom',
-        legend.title = element_blank()) +
-  scale_fill_manual(values = c('Hits_9119' = '#fde725', 'Hits_6290' = '#440154', 'Non-hits' = 'white'),
-                    labels = c('1962-1989 charting','1990-2019 charting','Non-charting')) +
-  scale_color_manual(values = c('B' = '#ea9bfd','A' ='#ffff66'), guide = 'none')
 
